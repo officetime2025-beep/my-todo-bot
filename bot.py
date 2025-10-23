@@ -3,7 +3,7 @@ from telegram.ext import Application, CommandHandler, ContextTypes
 import os
 
 # Токен из переменной среды
-TOKEN = os.environ["8402424321:AAH-LHIMD1X_0ehxO5joFNLp8fePNYND76g"]
+TOKEN = os.environ["8402424321:AAGj4qrviywPs9RDLslWqDeRh_CDF0eHesY"]
 
 # Хранилище задач (в памяти)
 tasks = []
@@ -60,4 +60,5 @@ if __name__ == "__main__":
     app.add_handler(CommandHandler("clear", clear_tasks))
     print("✅ Бот запущен!")
     app.run_polling()
+
 
