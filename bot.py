@@ -8,7 +8,7 @@ import logging
 logging.basicConfig(level=logging.INFO)
 
 # Токен из переменной среды (обязательно задай в Railway!)
-TOKEN = os.environ["8402424321:AAH-LHIMD1X_0ehxO5joFNLp8fePNYND76g"]
+TOKEN = os.environ["TOKEN"]
 
 # Категории
 CATEGORIES = [
@@ -227,3 +227,4 @@ if __name__ == "__main__":
 
     print("✅ Бот запущен!")
     app.run_polling()
+
