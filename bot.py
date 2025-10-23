@@ -1,13 +1,13 @@
 from telegram import Update, ReplyKeyboardMarkup, KeyboardButton, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, ContextTypes, filters, JobQueue
+from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, ContextTypes, filters
 import json
 import os
 import logging
 
-# Настройка логов (полезно для отладки в Railway)
+# Настройка логов
 logging.basicConfig(level=logging.INFO)
 
-# Токен из переменной среды (обязательно задай в Railway!)
+# Токен из переменной среды (задаётся в Railway)
 TOKEN = os.environ["TOKEN"]
 
 # Категории
@@ -39,7 +39,7 @@ def save_data():
 
 def get_main_keyboard():
     buttons = [[KeyboardButton(cat)] for cat in CATEGORIES]
-    buttons.append([KeyboardButton("📋 Показать всё")])  # «Очистить всё» удалено
+    buttons.append([KeyboardButton("📋 Показать всё")])
     return ReplyKeyboardMarkup(buttons, resize_keyboard=True, one_time_keyboard=False)
 
 async def send_daily_reminder(context: ContextTypes.DEFAULT_TYPE):
@@ -49,7 +49,6 @@ async def send_daily_reminder(context: ContextTypes.DEFAULT_TYPE):
     if user_id not in user_data:
         return
 
-    # Считаем невыполненные задачи
     total_pending = 0
     for cat in CATEGORIES:
         tasks = user_data[user_id][cat]
@@ -72,19 +71,16 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if user_id not in user_data:
         user_data[user_id] = {cat: [] for cat in CATEGORIES}
 
-    # Настройка ежедневного напоминания
-    job_queue = context.job_queue
-    # Удаляем старые задания
-    current_jobs = job_queue.get_jobs_by_name(str(user_id))
+    # Удаляем старые напоминания
+    current_jobs = context.job_queue.get_jobs_by_name(str(user_id))
     for job in current_jobs:
         job.schedule_removal()
-    # Запускаем напоминание:
-    # - первый раз через 10 секунд (для теста!)
-    # - потом каждые 24 часа
-    job_queue.run_repeating(
+
+    # Запускаем новое напоминание (первый раз через 10 сек, потом каждые 24 часа)
+    context.job_queue.run_repeating(
         send_daily_reminder,
-        interval=24 * 60 * 60,  # 24 часа
-        first=10,               # первый запуск через 10 секунд
+        interval=24 * 60 * 60,
+        first=10,
         chat_id=update.effective_chat.id,
         name=str(user_id)
     )
@@ -102,7 +98,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if user_id not in user_data:
         user_data[user_id] = {cat: [] for cat in CATEGORIES}
 
-    # Выбор категории
     if text in CATEGORIES:
         context.user_data["selected_category"] = text
         tasks = user_data[user_id][text]
@@ -113,7 +108,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
             return
 
-        # Отправляем каждую задачу отдельным сообщением с кнопками
         for i, task in enumerate(tasks):
             mark = "✅" if task["done"] else "⬜"
             msg_text = f"{mark} *{task['text']}*"
@@ -128,7 +122,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text(msg_text, parse_mode="Markdown", reply_markup=keyboard)
         return
 
-    # Показать всё
     if text == "📋 Показать всё":
         full_msg = "📝 *Все задачи:*\n\n"
         has_tasks = False
@@ -162,7 +155,6 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     data = query.data
 
-    # Обработка переключения статуса
     if data.startswith("toggle_"):
         parts = data.split("_", 2)
         if len(parts) != 3:
@@ -194,7 +186,6 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
         return
 
-    # Обработка удаления
     if data.startswith("delete_"):
         parts = data.split("_", 2)
         if len(parts) != 3:
@@ -227,8 +218,3 @@ if __name__ == "__main__":
 
     print("✅ Бот запущен!")
     app.run_polling()
-
-
-
-
-
