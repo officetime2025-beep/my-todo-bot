@@ -1,10 +1,14 @@
-from telegram import Update, ReplyKeyboardMarkup, KeyboardButton
-from telegram.ext import Application, CommandHandler, MessageHandler, ContextTypes, filters
+from telegram import Update, ReplyKeyboardMarkup, KeyboardButton, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, ContextTypes, filters, JobQueue
 import json
 import os
+import logging
 
-# Настройки
-TOKEN = "8402424321:AAH-LHIMD1X_0ehxO5joFNLp8fePNYND76g"
+# Настройка логов (полезно для отладки в Railway)
+logging.basicConfig(level=logging.INFO)
+
+# Токен из переменной среды (обязательно задай в Railway!)
+TOKEN = os.environ["8402424321:AAH-LHIMD1X_0ehxO5joFNLp8fePNYND76g"]
 
 # Категории
 CATEGORIES = [
@@ -12,10 +16,8 @@ CATEGORIES = [
     "дом/мыла", "здоровье", "ребёнок", "прочее"
 ]
 
-# Хранилище: { user_id: { category: [ { "text": "...", "done": False }, ... ] } }
+# Хранилище данных
 user_data = {}
-
-# Сохранение и загрузка (опционально, для перезапуска)
 DATA_FILE = "tasks.json"
 
 def load_data():
@@ -24,7 +26,6 @@ def load_data():
         try:
             with open(DATA_FILE, "r", encoding="utf-8") as f:
                 raw = json.load(f)
-                # Преобразуем ключи user_id из str обратно в int
                 user_data = {int(k): v for k, v in raw.items()}
         except Exception as e:
             print(f"Ошибка загрузки: {e}")
@@ -36,48 +37,98 @@ def save_data():
     except Exception as e:
         print(f"Ошибка сохранения: {e}")
 
-# Главное меню с кнопками
 def get_main_keyboard():
     buttons = [[KeyboardButton(cat)] for cat in CATEGORIES]
-    buttons.append([KeyboardButton("📋 Показать всё"), KeyboardButton("🗑️ Очистить всё")])
+    buttons.append([KeyboardButton("📋 Показать всё")])  # «Очистить всё» удалено
     return ReplyKeyboardMarkup(buttons, resize_keyboard=True, one_time_keyboard=False)
 
-# Команда /start
+async def send_daily_reminder(context: ContextTypes.DEFAULT_TYPE):
+    job = context.job
+    user_id = job.chat_id
+
+    if user_id not in user_data:
+        return
+
+    # Считаем невыполненные задачи
+    total_pending = 0
+    for cat in CATEGORIES:
+        tasks = user_data[user_id][cat]
+        pending = [t for t in tasks if not t["done"]]
+        total_pending += len(pending)
+
+    if total_pending > 0:
+        await context.bot.send_message(
+            chat_id=user_id,
+            text=f"🕒 Доброе утро! У тебя {total_pending} невыполненных задач. Не забудь про них! 😊"
+        )
+    else:
+        await context.bot.send_message(
+            chat_id=user_id,
+            text="✨ Все задачи выполнены! Отличная работа! 🎉"
+        )
+
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
-    if user_id not in user_data:
+    if user_id not in user_
         user_data[user_id] = {cat: [] for cat in CATEGORIES}
+
+    # Настройка ежедневного напоминания
+    job_queue = context.job_queue
+    # Удаляем старые задания
+    current_jobs = job_queue.get_jobs_by_name(str(user_id))
+    for job in current_jobs:
+        job.schedule_removal()
+    # Запускаем напоминание:
+    # - первый раз через 10 секунд (для теста!)
+    # - потом каждые 24 часа
+    job_queue.run_repeating(
+        send_daily_reminder,
+        interval=24 * 60 * 60,  # 24 часа
+        first=10,               # первый запуск через 10 секунд
+        chat_id=update.effective_chat.id,
+        name=str(user_id)
+    )
+
     await update.message.reply_text(
         "Привет! 👋 Я твой персональный список дел.\n\n"
         "Выбери категорию ниже или напиши задачу — я добавлю её в 'прочее'.",
         reply_markup=get_main_keyboard()
     )
 
-# Обработка текстовых сообщений
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     text = update.message.text.strip()
 
-    # Инициализация для нового пользователя
-    if user_id not in user_data:
+    if user_id not in user_
         user_data[user_id] = {cat: [] for cat in CATEGORIES}
 
-    # Если сообщение — это название категории
+    # Выбор категории
     if text in CATEGORIES:
         context.user_data["selected_category"] = text
         tasks = user_data[user_id][text]
-        if tasks:
-            msg = f"📌 *{text.capitalize()}*:\n\n"
-            for i, task in enumerate(tasks, 1):
-                mark = "✅" if task["done"] else "⬜"
-                msg += f"{i}. {mark} {task['text']}\n"
-            msg += f"\nНапиши новую задачу или номер для отметки (например: 1)"
-        else:
-            msg = f"В категории *{text}* пока пусто.\nНапиши задачу — я добавлю её!"
-        await update.message.reply_text(msg, parse_mode="Markdown")
+        if not tasks:
+            await update.message.reply_text(
+                f"В категории *{text}* пока пусто.\nНапиши задачу — я добавлю её!",
+                parse_mode="Markdown"
+            )
+            return
+
+        # Отправляем каждую задачу отдельным сообщением с кнопками
+        for i, task in enumerate(tasks):
+            mark = "✅" if task["done"] else "⬜"
+            msg_text = f"{mark} *{task['text']}*"
+            toggle_data = f"toggle_{text}_{i}"
+            delete_data = f"delete_{text}_{i}"
+            keyboard = InlineKeyboardMarkup([
+                [
+                    InlineKeyboardButton("✅ Выполнено", callback_data=toggle_data),
+                    InlineKeyboardButton("❌ Удалить", callback_data=delete_data)
+                ]
+            ])
+            await update.message.reply_text(msg_text, parse_mode="Markdown", reply_markup=keyboard)
         return
 
-    # Команда "Показать всё"
+    # Показать всё
     if text == "📋 Показать всё":
         full_msg = "📝 *Все задачи:*\n\n"
         has_tasks = False
@@ -95,41 +146,84 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(full_msg, parse_mode="Markdown")
         return
 
-    # Команда "Очистить всё"
-    if text == "🗑️ Очистить всё":
-        user_data[user_id] = {cat: [] for cat in CATEGORIES}
-        save_data()
-        await update.message.reply_text("Все задачи удалены! 🧹")
-        return
-
-    # Пользователь прислал задачу или номер
+    # Добавление новой задачи
     selected_cat = context.user_data.get("selected_category", "прочее")
-
-    # Проверяем, не является ли текст номером задачи
-    if text.isdigit():
-        task_num = int(text) - 1
-        tasks = user_data[user_id][selected_cat]
-        if 0 <= task_num < len(tasks):
-            tasks[task_num]["done"] = not tasks[task_num]["done"]
-            status = "выполнена" if tasks[task_num]["done"] else "возвращена в работу"
-            await update.message.reply_text(f"Задача №{task_num + 1} {status} ✅")
-            save_data()
-        else:
-            await update.message.reply_text("Нет задачи с таким номером.")
-        return
-
-    # Иначе — добавляем новую задачу
     user_data[user_id][selected_cat].append({"text": text, "done": False})
     save_data()
-    await update.message.reply_text(f"✅ Добавлено в *{selected_cat}*:\n«{text}»", parse_mode="Markdown")
+    await update.message.reply_text(
+        f"✅ Добавлено в *{selected_cat}*:\n«{text}»",
+        parse_mode="Markdown"
+    )
 
-# Основной запуск
+async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+
+    user_id = update.effective_user.id
+    data = query.data
+
+    # Обработка переключения статуса
+    if data.startswith("toggle_"):
+        parts = data.split("_", 2)
+        if len(parts) != 3:
+            return
+        _, category, index_str = parts
+        try:
+            index = int(index_str)
+        except ValueError:
+            return
+
+        if user_id not in user_data or category not in user_data[user_id]:
+            await query.edit_message_text("❌ Данные устарели. Открой категорию заново.")
+            return
+
+        tasks = user_data[user_id][category]
+        if 0 <= index < len(tasks):
+            tasks[index]["done"] = not tasks[index]["done"]
+            save_data()
+            mark = "✅" if tasks[index]["done"] else "⬜"
+            await query.edit_message_text(
+                text=f"{mark} *{tasks[index]['text']}*",
+                parse_mode="Markdown",
+                reply_markup=InlineKeyboardMarkup([
+                    [
+                        InlineKeyboardButton("✅ Выполнено", callback_data=f"toggle_{category}_{index}"),
+                        InlineKeyboardButton("❌ Удалить", callback_data=f"delete_{category}_{index}")
+                    ]
+                ])
+            )
+        return
+
+    # Обработка удаления
+    if data.startswith("delete_"):
+        parts = data.split("_", 2)
+        if len(parts) != 3:
+            return
+        _, category, index_str = parts
+        try:
+            index = int(index_str)
+        except ValueError:
+            return
+
+        if user_id not in user_data or category not in user_data[user_id]:
+            await query.edit_message_text("❌ Данные устарели.")
+            return
+
+        tasks = user_data[user_id][category]
+        if 0 <= index < len(tasks):
+            deleted_task = tasks.pop(index)
+            save_data()
+            await query.edit_message_text(f"❌ Удалено: *{deleted_task['text']}*", parse_mode="Markdown")
+        return
+
+# Запуск приложения
 if __name__ == "__main__":
     load_data()
     app = Application.builder().token(TOKEN).build()
 
     app.add_handler(CommandHandler("start", start))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
+    app.add_handler(CallbackQueryHandler(button_handler))
 
-    print("Бот запущен!")
+    print("✅ Бот запущен!")
     app.run_polling()
