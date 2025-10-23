@@ -7,7 +7,7 @@ import logging
 # Настройка логов
 logging.basicConfig(level=logging.INFO)
 
-# Токен из переменной среды (задаётся в Railway)
+# Токен из переменной среды
 TOKEN = os.environ["TOKEN"]
 
 # Категории
@@ -16,7 +16,6 @@ CATEGORIES = [
     "дом/мыла", "здоровье", "Глеб", "Никита", "прочее"
 ]
 
-# Хранилище данных
 user_data = {}
 DATA_FILE = "tasks.json"
 
@@ -28,11 +27,7 @@ def load_data():
                 raw = json.load(f)
                 user_data = {int(k): v for k, v in raw.items()}
         except Exception as e:
-            print(f"Ошибка загрузки: {e}")
-
-def save_data():
-    try:
-        with open(DATA_FILE, "w", encoding="utf-8") as f:
+            print(f" open(DATA_FILE, "w", encoding="utf-8") as f:
             json.dump(user_data, f, ensure_ascii=False, indent=2)
     except Exception as e:
         print(f"Ошибка сохранения: {e}")
@@ -67,21 +62,22 @@ async def send_daily_reminder(context: ContextTypes.DEFAULT_TYPE):
         )
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.effective_user.id
+    user_id = int(update.effective_user.id)
     if user_id not in user_data:
         user_data[user_id] = {cat: [] for cat in CATEGORIES}
+        save_data()
 
     # Удаляем старые напоминания
     current_jobs = context.job_queue.get_jobs_by_name(str(user_id))
     for job in current_jobs:
         job.schedule_removal()
 
-    # Запускаем новое напоминание (первый раз через 10 сек, потом каждые 24 часа)
+    # Новое напоминание (первый раз через 10 сек, потом каждые 24 часа)
     context.job_queue.run_repeating(
         send_daily_reminder,
         interval=24 * 60 * 60,
         first=10,
-        chat_id=update.effective_chat.id,
+        chat_id=user_id,
         name=str(user_id)
     )
 
@@ -92,11 +88,12 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.effective_user.id
+    user_id = int(update.effective_user.id)
     text = update.message.text.strip()
 
     if user_id not in user_data:
         user_data[user_id] = {cat: [] for cat in CATEGORIES}
+        save_data()
 
     if text in CATEGORIES:
         context.user_data["selected_category"] = text
@@ -152,7 +149,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
 
-    user_id = update.effective_user.id
+    user_id = int(update.effective_user.id)
     data = query.data
 
     if data.startswith("toggle_"):
@@ -207,16 +204,14 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await query.edit_message_text(f"❌ Удалено: *{deleted_task['text']}*", parse_mode="Markdown")
         return
 
-# Запуск приложения
 if __name__ == "__main__":
     load_data()
     app = Application.builder().token(TOKEN).build()
 
     app.add_handler(CommandHandler("start", start))
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
+    app.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), handle_message))
     app.add_handler(CallbackQueryHandler(button_handler))
 
     print("✅ Бот запущен!")
     app.run_polling()
-
 
