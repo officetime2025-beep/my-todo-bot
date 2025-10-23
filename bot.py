@@ -69,7 +69,7 @@ async def send_daily_reminder(context: ContextTypes.DEFAULT_TYPE):
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
-   if user_id not in user_data:
+    if user_id not in user_data:
         user_data[user_id] = {cat: [] for cat in CATEGORIES}
 
     # Настройка ежедневного напоминания
@@ -227,6 +227,7 @@ if __name__ == "__main__":
 
     print("✅ Бот запущен!")
     app.run_polling()
+
 
 
 
